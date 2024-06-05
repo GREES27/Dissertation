@@ -1,0 +1,571 @@
+R Core Team (2023). _R: A Language and Environment for Statistical Computing_. R
+  Foundation for Statistical Computing, Vienna, Austria. <https://www.R-project.org/>.
+# Version info: R 4.2.2, Biobase 2.58.0, GEOquery 2.66.0, limma 3.54.0
+################################################################
+#   Differential expression analysis with limma
+library(GEOquery)
+library(limma)
+library(umap)
+# load series and platform data from GEO
+gset <- getGEO("GSE42510", GSEMatrix =TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL8490", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+# make proper column names to match toptable
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+# group membership for all samples
+gsms <- "11111111100000000"
+sml <- strsplit(gsms, split="")[[1]]
+# log2 transformation
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  exprs(gset) <- log2(ex) }
+# assign samples to groups and set up design matrix
+gs <- factor(sml)
+groups <- make.names(c("control","fibrosis"))
+levels(gs) <- groups
+gset$group <- gs
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+gset <- gset[complete.cases(exprs(gset)), ] # skip missing values
+fit <- lmFit(gset, design)  # fit linear model
+# set up contrasts of interest and recalculate model coefficients
+cts <- paste(groups[1], groups[2], sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+# compute statistics and table of top significant genes
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+tT <- subset(tT,
+select=c("ID","adj.P.Val","P.Value","t","B","logFC","RANGE_GB","RANGE_START","RANGE_END
+","RANGE_STRAND","GB_ACC","ORF"))
+write.table(tT, file=stdout(), row.names=F, sep="\t")
+# Visualize and quality control test results.
+# Build histogram of P-values for all genes. Normal test
+# assumption is that most genes are not differentially expressed.
+tT2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tT2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+  ylab = "Number of genes", main = "P-adj value distribution")
+38
+# summarize test results as "up", "down" or "not expressed"
+dT <- decideTests(fit2, adjust.method="fdr", p.value=0.05, lfc=2)
+# Venn diagram of results
+vennDiagram(dT, circle.col=palette())
+# create Q-Q plot for t-statistic
+t.good <- which(!is.na(fit2$F)) # filter out bad probes
+qqt(fit2$t[t.good], fit2$df.total[t.good], main="Moderated t statistic")
+# volcano plot (log P-value vs log fold change)
+colnames(fit2) # list contrast names
+ct <- 1        # choose contrast of interest
+# Please note that the code provided to generate graphs serves as a guidance to
+# the users. It does not replicate the exact GEO2R web display due to multitude
+# of graphical options.
+#
+# The following will produce basic volcano plot using limma function:
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+  highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+# MD plot (log fold change vs mean log expression)
+# highlight statistically significant (p-adj < 0.05) probes
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+################################################################
+# General expression data analysis
+ex <- exprs(gset)
+# box-and-whisker plot
+ord <- order(gs)  # order samples by group
+palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste ("GSE42510", "/", annotation(gset), sep ="")
+boxplot(ex[,ord], boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("GSE42510", "/", annotation(gset), " value distribution", sep ="")
+plotDensities(ex, group=gs, main=title, legend ="topright")
+# UMAP plot (dimensionality reduction)
+ex <- na.omit(ex) # eliminate rows with NAs
+ex <- ex[!duplicated(ex), ]  # remove duplicates
+ump <- umap(t(ex), n_neighbors = 7, random_state = 123)
+par(mar=c(3,3,2,6), xpd=TRUE)
+plot(ump$layout, main="UMAP plot, nbrs=7", xlab="", ylab="", col=gs, pch=20, cex=1.5)
+legend("topright", inset=c(-0.15,0), legend=levels(gs), pch=20,
+col=1:nlevels(gs), title="Group", pt.cex=1.5)
+library("maptools")  # point labels without overlaps
+pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
+# mean-variance trend, helps to see if precision weights are needed
+plotSA(fit2, main="Mean variance trend, GSE42510")
+# load series and platform data from GEO
+gset <- getGEO("GSE152519", GSEMatrix =TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL21145", attr(gset, "names")) else idx <- 1
+
+gset <- gset[[idx]]
+# make proper column names to match toptable
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+# group membership for all samples
+gsms <- "111111111111111100000000000000000000"
+sml <- strsplit(gsms, split="")[[1]]
+# log2 transformation
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  exprs(gset) <- log2(ex) }
+# assign samples to groups and set up design matrix
+gs <- factor(sml)
+groups <- make.names(c("control","fibrosis"))
+levels(gs) <- groups
+gset$group <- gs
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+gset <- gset[complete.cases(exprs(gset)), ] # skip missing values
+fit <- lmFit(gset, design)  # fit linear model
+# set up contrasts of interest and recalculate model coefficients
+cts <- paste(groups[1], groups[2], sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+# compute statistics and table of top significant genes
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+tT <- subset(tT, select=c("ID","adj.P.Val","P.Value","t","B","logFC","SPOT_ID"))
+write.table(tT, file=stdout(), row.names=F, sep="\t")
+# Visualize and quality control test results.
+# Build histogram of P-values for all genes. Normal test
+# assumption is that most genes are not differentially expressed.
+tT2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tT2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+  ylab = "Number of genes", main = "P-adj value distribution")
+# summarize test results as "up", "down" or "not expressed"
+dT <- decideTests(fit2, adjust.method="fdr", p.value=0.05, lfc=2)
+# Venn diagram of results
+vennDiagram(dT, circle.col=palette())
+# create Q-Q plot for t-statistic
+t.good <- which(!is.na(fit2$F)) # filter out bad probes
+qqt(fit2$t[t.good], fit2$df.total[t.good], main="Moderated t statistic")
+# volcano plot (log P-value vs log fold change)
+colnames(fit2) # list contrast names
+ct <- 1        # choose contrast of interest
+# Please note that the code provided to generate graphs serves as a guidance to
+# the users. It does not replicate the exact GEO2R web display due to multitude
+# of graphical options.
+#
+# The following will produce basic volcano plot using limma function:
+40
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+  highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+# MD plot (log fold change vs mean log expression)
+# highlight statistically significant (p-adj < 0.05) probes
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+################################################################
+# General expression data analysis
+ex <- exprs(gset)
+# box-and-whisker plot
+dev.new(width=3+ncol(gset)/6, height=5)
+ord <- order(gs)  # order samples by group
+palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste ("GSE152519", "/", annotation(gset), sep ="")
+boxplot(ex[,ord], boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+dev.off()
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("GSE152519", "/", annotation(gset), " value distribution", sep ="")
+plotDensities(ex, group=gs, main=title, legend ="topright")
+# UMAP plot (dimensionality reduction)
+ex <- na.omit(ex) # eliminate rows with NAs
+ex <- ex[!duplicated(ex), ]  # remove duplicates
+ump <- umap(t(ex), n_neighbors = 15, random_state = 123)
+par(mar=c(3,3,2,6), xpd=TRUE)
+plot(ump$layout, main="UMAP plot, nbrs=15", xlab="", ylab="", col=gs, pch=20, cex=1.5)
+legend("topright", inset=c(-0.15,0), legend=levels(gs), pch=20,
+col=1:nlevels(gs), title="Group", pt.cex=1.5)
+library("maptools")  # point labels without overlaps
+pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
+# mean-variance trend, helps to see if precision weights are needed
+plotSA(fit2, main="Mean variance trend, GSE152519")
+# load series and platform data from GEO
+gset <- getGEO("GSE229848", GSEMatrix =TRUE, getGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL21145", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+ex <- exprs(gset)
+# log2 transform
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  ex <- log2(ex) }
+# box-and-whisker plot
+par(mar=c(7,4,2,1))
+title <- paste ("GSE229848", "/", annotation(gset), sep ="")
+boxplot(ex, boxwex=0.7, notch=T, main=title, outline=FALSE, las=2)
+# expression value distribution plot
+par(mar=c(4,4,2,1))
+
+title <- paste ("GSE229848", "/", annotation(gset), " value distribution", sep ="")
+plotDensities(ex, main=title, legend=F)
+# mean-variance trend
+ex <- na.omit(ex) # eliminate rows with NAs
+plotSA(lmFit(ex), main="Mean variance trend, GSE229848")
+# UMAP plot (multi-dimensional scaling)
+ex <- ex[!duplicated(ex), ]  # remove duplicates
+ump <- umap(t(ex), n_neighbors = 5, random_state = 123)
+plot(ump$layout, main="UMAP plot, nbrs=5", xlab="", ylab="", pch=20, cex=1.5)
+library("maptools")  # point labels without overlaps
+pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
+# Version info: R 4.2.2, Biobase 2.58.0, GEOquery 2.66.0, limma 3.54.0
+################################################################
+#   Differential expression analysis with limma
+library(GEOquery)
+library(limma)
+library(umap)
+# load series and platform data from GEO
+gset <- getGEO("GSE57831", GSEMatrix =TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL13534", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+# make proper column names to match toptable
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+# group membership for all samples
+gsms <- "000111"
+sml <- strsplit(gsms, split="")[[1]]
+# log2 transformation
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  exprs(gset) <- log2(ex) }
+# assign samples to groups and set up design matrix
+gs <- factor(sml)
+groups <- make.names(c("control","fibrosis"))
+levels(gs) <- groups
+gset$group <- gs
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+gset <- gset[complete.cases(exprs(gset)), ] # skip missing values
+fit <- lmFit(gset, design)  # fit linear model
+# set up contrasts of interest and recalculate model coefficients
+cts <- paste(groups[1], groups[2], sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+# compute statistics and table of top significant genes
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+42
+tT <- subset(tT,
+select=c("ID","adj.P.Val","P.Value","t","B","logFC","RANGE_START","RANGE_END","RANGE_GB
+","SPOT_ID"))
+write.table(tT, file=stdout(), row.names=F, sep="\t")
+# Visualize and quality control test results.
+# Build histogram of P-values for all genes. Normal test
+# assumption is that most genes are not differentially expressed.
+tT2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tT2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+  ylab = "Number of genes", main = "P-adj value distribution")
+# summarize test results as "up", "down" or "not expressed"
+dT <- decideTests(fit2, adjust.method="fdr", p.value=0.05, lfc=2)
+# Venn diagram of results
+vennDiagram(dT, circle.col=palette())
+# create Q-Q plot for t-statistic
+t.good <- which(!is.na(fit2$F)) # filter out bad probes
+qqt(fit2$t[t.good], fit2$df.total[t.good], main="Moderated t statistic")
+# volcano plot (log P-value vs log fold change)
+colnames(fit2) # list contrast names
+ct <- 1        # choose contrast of interest
+# Please note that the code provided to generate graphs serves as a guidance to
+# the users. It does not replicate the exact GEO2R web display due to multitude
+# of graphical options.
+#
+# The following will produce basic volcano plot using limma function:
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+  highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+# MD plot (log fold change vs mean log expression)
+# highlight statistically significant (p-adj < 0.05) probes
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+################################################################
+# General expression data analysis
+ex <- exprs(gset)
+# box-and-whisker plot
+ord <- order(gs)  # order samples by group
+palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste ("GSE57831", "/", annotation(gset), sep ="")
+boxplot(ex[,ord], boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("GSE57831", "/", annotation(gset), " value distribution", sep ="")
+plotDensities(ex, group=gs, main=title, legend ="topright")
+# UMAP plot (dimensionality reduction)
+ex <- na.omit(ex) # eliminate rows with NAs
+ex <- ex[!duplicated(ex), ]  # remove duplicates
+ump <- umap(t(ex), n_neighbors = 3, random_state = 123)
+par(mar=c(3,3,2,6), xpd=TRUE)
+plot(ump$layout, main="UMAP plot, nbrs=3", xlab="", ylab="", col=gs, pch=20, cex=1.5)
+legend("topright", inset=c(-0.15,0), legend=levels(gs), pch=20,
+col=1:nlevels(gs), title="Group", pt.cex=1.5)
+library("maptools")  # point labels without overlaps
+
+pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
+# mean-variance trend, helps to see if precision weights are needed
+plotSA(fit2, main="Mean variance trend, GSE57831")
+# load series and platform data from GEO
+gset <- getGEO("GSE63704", GSEMatrix =TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL13534", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+# make proper column names to match toptable
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+# group membership for all samples
+gsms <- paste0("11100111111101011110111110011111111001111111110X0X",
+        "00XXXXXXX0XXXXX0XX00XX000X00XXX0XXXX00XX0XXXXX000X",
+        "0X000XX0XX00XXXX0000X0XXX00XX")
+sml <- strsplit(gsms, split="")[[1]]
+# filter out excluded samples (marked as "X")
+sel <- which(sml != "X")
+sml <- sml[sel]
+gset <- gset[ ,sel]
+# log2 transformation
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  exprs(gset) <- log2(ex) }
+# assign samples to groups and set up design matrix
+gs <- factor(sml)
+groups <- make.names(c("control","fibrosis"))
+levels(gs) <- groups
+gset$group <- gs
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+gset <- gset[complete.cases(exprs(gset)), ] # skip missing values
+fit <- lmFit(gset, design)  # fit linear model
+# set up contrasts of interest and recalculate model coefficients
+cts <- paste(groups[1], groups[2], sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+# compute statistics and table of top significant genes
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+tT <- subset(tT,
+select=c("ID","adj.P.Val","P.Value","t","B","logFC","RANGE_START","RANGE_END","RANGE_GB
+","SPOT_ID"))
+write.table(tT, file=stdout(), row.names=F, sep="\t")
+# Visualize and quality control test results.
+# Build histogram of P-values for all genes. Normal test
+# assumption is that most genes are not differentially expressed.
+tT2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tT2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+  ylab = "Number of genes", main = "P-adj value distribution")
+44
+# summarize test results as "up", "down" or "not expressed"
+dT <- decideTests(fit2, adjust.method="fdr", p.value=0.05, lfc=2)
+# Venn diagram of results
+vennDiagram(dT, circle.col=palette())
+# create Q-Q plot for t-statistic
+t.good <- which(!is.na(fit2$F)) # filter out bad probes
+qqt(fit2$t[t.good], fit2$df.total[t.good], main="Moderated t statistic")
+# volcano plot (log P-value vs log fold change)
+colnames(fit2) # list contrast names
+ct <- 1        # choose contrast of interest
+# Please note that the code provided to generate graphs serves as a guidance to
+# the users. It does not replicate the exact GEO2R web display due to multitude
+# of graphical options.
+#
+# The following will produce basic volcano plot using limma function:
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+  highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+# MD plot (log fold change vs mean log expression)
+# highlight statistically significant (p-adj < 0.05) probes
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+################################################################
+# General expression data analysis
+ex <- exprs(gset)
+################################################################
+Differential Analysis Visualisation.
+# combined data has been tidied so that it contains beta methylation values for each
+tissue type
+      install.packages("ggvenn")
+library(ggvenn)
+      set_list <- list(
+        Heart = combined_data$Heart,
+        BoneMarrow = combined_data$Bone.Marrow,
+        Endometriosis = combined_data$Endometriosis,
+        Lungs = combined_data$Lungs,
+        Skin = your_data$Skin
+)
+ggvenn(set_list)
+      library(dplyr, tidyr)
+      combined_data <- read.csv("~/Desktop/Dissertation/Papers/Epigenetic
+      Papers/Heatmap/combined_data.csv")
+       View(combined_data)
+      library(tidyverse)
+      new_df <- combined_data %>%
+      +     select(ID, tissue, logFC)
+
+View(new_df)
+      diff_analysis <- new_df %>%
+      +     group_by(ID) %>%
+      +     summarize(shared_tissues = n_distinct(tissue),
+      +               diff_logFC = n_distinct(logFC)) %>%
+      +     mutate(diff_tissues = if_else(shared_tissues > 1, "Shared", "Different"))
+       print(diff_analysis)
+      shared_ids <- new_df %>%
+      +     group_by(ID) %>%
+      +     summarize(unique_tissues = n_distinct(tissue)) %>%
+      +     filter(unique_tissues == n_distinct(new_df$tissue)) %>%
+      +     pull(ID)
+       print(shared_ids)
+      subset_list_diff_shared <- list_diff_shared %>%
+      +     filter(shared_tissues == 5) %>%
+      +     select(ID, shared_tissues)
+       View(subset_list_diff_shared)
+       subset_list_diff <- list_diff_shared %>%
+      +          filter(shared_tissues == 1) %>%
+      +          select(ID, shared_tissues)
+      subset_list_diff <- list_diff_shared %>%
+      +          filter(shared_tissues == 1) %>%
+      +        select(ID, shared_tissues)
+       View(subset_list_diff)
+      write.csv(subset_list_diff, "sharedCpGlist.csv")
+write.csv(subset_list_diff, "diffCpGlist.csv")
+Functional Analysis.
+Gene Set Enrichment Analysis.
+      BiocManager::install("clusterProfiler", version = "3.8")
+      BiocManager::install("pathview")
+      BiocManager::install("enrichplot")
+      library(clusterProfiler)
+      library(enrichplot)
+      library(ggplot2)
+      organism = "org.Dm.eg.db"
+      BiocManager::install(organism, character.only = TRUE)
+      library(organism, character.only = TRUE)
+      # GSE35147 - Lungs
+      subset_data <- GSE35147.top.table[, c("Symbol", "logFC", "P.Value")]
+       gene_list<-subset_data$logFC
+       names(gene_list)<-subset_data$Symbol
+46
+gene_list=sort(gene_list, decreasing=TRUE)
+ print(gene_list)
+gse <- gseGO(geneList=gene_list,
+                          ont ="BP",
+                          keyType = "SYMBOL",
+                           nPerm = 10000,
+                           minGSSize = 3,
+                           maxGSSize = 800,
+                           pvalueCutoff = 0.05,
+                           verbose = TRUE,
+                           OrgDb = organism,
+                           pAdjustMethod = "none")
+require(DOSE)
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+cnetplot(gse, categorySize="pvalue", foldChange=gene_list, showCategory = 3)
+ridgeplot(gse) + labs(x = "enrichment distribution")
+# GSE42510 - Heart
+subset_data1 <- GSE42510.top.table[, c("Symbol", "logFC", "P.Value")]
+gene_list1<-subset_data1$logFC
+names(gene_list1)<-subset_data1$Symbol
+gene_list1=sort(gene_list1, decreasing=TRUE)
+print(gene_list1)
+gse <- gseGO(geneList=gene_list1,
+             ont ="BP",
+             keyType = "SYMBOL",
+             nPerm = 10000,
+             minGSSize = 3,
+             maxGSSize = 800,
+             pvalueCutoff = 0.05,
+             verbose = TRUE,
+             OrgDb = organism,
+             pAdjustMethod = "none")
+require(DOSE)
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+cnetplot(gse, categorySize="pvalue", foldChange=gene_list, showCategory = 3)
+ridgeplot(gse) + labs(x = "enrichment distribution")
+as.data.frame(gse)
+write.csv(my_data, "output_file.csv", row.names = FALSE)
+# GSE229848, GSE57831, GSE152519 will be analysed using methylGSA
+if (!requireNamespace("BiocManager", quietly = TRUE))
+                 install.packages("BiocManager")
+               BiocManager::install("methylGSA")
+               library(methylGSA)
+ # methylGSA app is then opened in R. datasets are uploaded as txt file using adj.p
+value and CpG ID.
+# Bubble plot for visualisation of gene set enrichment for all Tissue types
+      Top10_data <- SigTissues %>%
+        group_by(Tissue) %>%
+        top_n(10, wt = padj) %>%
+ungroup()
+      bubble_plot <- ggplot(top10_data, aes(x = NES, y = Description, size= Size, color
+      = padj, shape = Tissue)) +
+           geom_point(alpha = 0.8) +
+           scale_size_continuous(trans = "sqrt", range = c(2, 10)) +
+       scale_color_gradient(low = "blue", high = "red") +
+           labs(title = "",
+                x = "Normalised Enrichment Score",
+                y = "Gene Set Description",
+                size = "Size",
+                color = "Adj P Value") +
+           theme_minimal()
+print(bubble_plot)
+#######################################################################################
+# Create a bubble plot for shared GO terms across all samples according to p <0.05
+#merge dataframes for each tissue according to “Description”
+merged_df <- merge(Lungs, SharedBP, by="Description", all=FALSE)
+# repeat for each tissue dataframe
+#remove X column
+merged_df <- merged_df[, !grepl("^X", names(merged_df))]
+# create a new dataframe to filter according to p-value for each tissue
+filtered_df <- merged_df %>%
+  filter(padj < 0.05, padj < 0.05)
+# create bubble plot to visualise enrichment results
+ggplot(filtered_df, aes(x = enrichmentScore, y = Description, size = Size, color =
+padj)) +
++     geom_point(alpha = 0.7) +
++     scale_size_continuous(range = c(5, 20)) +
++     scale_color_gradient(low = "blue", high = "red") +
++     labs(x = "Enrichment Score", y = "", color = "Adjusted p-value") +
++     theme_minimal()
+48
+print(filtered_df$ID)
+print (filtered_df$Description)
+# Export results to add to thesis
+write.csv(filtered_df, "sharedpaths.csv", row.names= FALSE)
+# count genes in shared pathways
+library(stringr)
+count_entries <- str_count(filtered_df$core_enrichment, "/")
+total_entries <- sum(count_entries)
+ print(total_entries)
+[1] 2063
+# extract gene names and create supplementary file
+entries_between_slash <- str_extract_all(filtered_df$core_enrichment, "[^/]+")
+entries_vector <- unlist(entries_between_slash)
+entries_df <- data.frame(entries = entries_vector)
+write.csv(entries_df, "entries_between_slash.csv", row.names = FALSE)
+#######################################################################################
+FinalGSEA <- read.csv("~/Desktop/Dissertation/GSEA results/FinalGSEA.csv")
+View(FinalGSEA)
+str(FinalGSEA)
+library(VennDiagram)
+descriptions_by_tissue <- split(FinalGSEA$Description, FinalGSEA$Tissue)
+View(descriptions_by_tissue)
+tissue_colors <- c("blue", "green", "red", "orange", "purple")
+venn.plot <- venn.diagram(   x = descriptions_by_tissue,
+      +     category.names = unique(FinalGSEA$Tissue),
+      +     filename = NULL,
+      +     fill = tissue_colors,
++ alpha = 0.5,
++ fontfamily = "serif" +)
+ grid.draw(venn.plot)
+
+
+
+
+
